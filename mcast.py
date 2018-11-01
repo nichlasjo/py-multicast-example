@@ -14,62 +14,47 @@
 #   mcast -s -i eth0 (sender, IPv4, eth0)
 #   mcast -i eth0 (receivers, IPv4, eth0)
 
-MYPORT = 8123
-MYGROUP_4 = '225.0.0.250'
-MYGROUP_6 = 'ff15:7079:7468:6f6e:6465:6d6f:6d63:6173'
-MYTTL = 1 # Increase to reach other networks
-
 import time
 import struct
 import socket
-import sys, getopt
+import sys
 import fcntl
+from optparse import OptionParser
 
-def main(argv):
-    group = MYGROUP_4
-    port = MYPORT
-    action = 0
-    interface = None
+def main(opts):
+    if not opts.interface:
+      p.error("to specify interface is minimum ")
 
-    try:
-      opts, args = getopt.getopt(argv,"s6i:",["inf="])
-    except getopt.GetoptError:
-      print 'wrong input'
-      sys.exit(2)
-    for opt, arg in opts:
-      if opt == '-s':
-         action = 1
-      elif opt == '-6':
-         group = MYGROUP_6
-      elif opt in ("-i", "--inf"):
-         interface = arg
-
-    if action == 0:
+    if opts.interface:
+       interface = opts.interface
+    if opts.ipv6:
+       group = 'ff15:7079:7468:6f6e:6465:6d6f:6d63:6173'
+    else:
+       group = '225.0.0.250'
+    if not opts.sender:
         # multicast receiver
         receiver(group, interface)
     else:
         # multicast sender
         sender(group, interface)
 
-
 def sender(group, interface):
     addrinfo = socket.getaddrinfo(group, None)[0]
 
     s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
-
     # Set Time-to-live (optional)
-    ttl_bin = struct.pack('@i', MYTTL)
+    ttl_bin = struct.pack('@i', opts.ttl)
     if addrinfo[0] == socket.AF_INET: # IPv4
         s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl_bin)
     else:
         s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
 
     if interface != None:
-        s.setsockopt(socket.SOL_SOCKET, 25, interface)
+        s.bind(('', opts.port))
 
     while True:
         data = repr(time.time())
-        s.sendto(data + '\0', (addrinfo[4][0], MYPORT))
+        s.sendto(data + '\0', (addrinfo[4][0], opts.port))
         time.sleep(1)
 
 def receiver(group, interface):
@@ -84,7 +69,7 @@ def receiver(group, interface):
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
     # Bind it to the port
-    s.bind(('', MYPORT))
+    s.bind(('', opts.port))
 
     group_bin = socket.inet_pton(addrinfo[0], addrinfo[4][0])
     # Join group
@@ -93,7 +78,7 @@ def receiver(group, interface):
         if interface == None:
             mreq = group_bin + struct.pack('=I', socket.INADDR_ANY)
         else:
-            ip_addr = get_ip_address(interface)
+            ip_addr = socket.gethostbyname(socket.gethostname())
             ip_addr_n = socket.inet_aton(ip_addr)
             mreq = group_bin + struct.pack("=4s", ip_addr_n)
             s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
@@ -122,4 +107,12 @@ def get_ip_address(ifname):
     )[20:24])
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    p = OptionParser(usage="usage: %prog [ --interface <INTERFACE> ] --port <PORT_NUMBER> --send ",
+                     version="%prog 0.7")
+    p.add_option("-s", "--send", dest="sender", help="Send Mcast", action="store_true")
+    p.add_option("-6", "--ipv6", dest="ipv6", help="Ipv6 Mcast", action="store_true")
+    p.add_option("-i", "--interface", dest="interface", help="Network interface")
+    p.add_option("-p", "--port", dest="port", help="Network Port", default="8123", type="int")
+    p.add_option("-t", "--ttl", dest="ttl", help="Mcast ttl", default="1", type="int")
+    (opts, args) = p.parse_args()
+    main(opts)
